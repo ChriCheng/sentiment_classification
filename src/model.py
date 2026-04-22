@@ -15,6 +15,8 @@ class TextCNN(nn.Module):
         kernel_sizes: List[int],
         dropout: float = 0.5,
         pad_idx: int = 0,
+        pretrained_embeddings: torch.Tensor = None,
+        freeze_embedding: bool = False,
     ):
         super().__init__()
 
@@ -24,6 +26,17 @@ class TextCNN(nn.Module):
             padding_idx=pad_idx,
         )
 
+        if pretrained_embeddings is not None:
+            if pretrained_embeddings.shape != self.embedding.weight.data.shape:
+                raise ValueError(
+                    f"Shape mismatch: pretrained_embeddings={pretrained_embeddings.shape}, "
+                    f"embedding_weight={self.embedding.weight.data.shape}"
+                )
+            self.embedding.weight.data.copy_(pretrained_embeddings)
+
+        if freeze_embedding:
+            self.embedding.weight.requires_grad = False
+
         self.convs = nn.ModuleList(
             [nn.Conv2d(1, num_filters, (k, embed_dim)) for k in kernel_sizes]
         )
@@ -32,7 +45,6 @@ class TextCNN(nn.Module):
         self.fc = nn.Linear(num_filters * len(kernel_sizes), num_classes)
 
     def conv_and_pool(self, x: torch.Tensor, conv: nn.Module) -> torch.Tensor:
-        # x: [B, 1, L, E]
         x = conv(x)                 # [B, F, L-k+1, 1]
         x = F.relu(x)
         x = x.squeeze(3)            # [B, F, L-k+1]
@@ -44,7 +56,7 @@ class TextCNN(nn.Module):
         x = x.unsqueeze(1)              # [B, 1, L, E]
 
         conv_outputs = [self.conv_and_pool(x, conv) for conv in self.convs]
-        x = torch.cat(conv_outputs, dim=1)   # [B, F * len(kernel_sizes)]
+        x = torch.cat(conv_outputs, dim=1)
 
         x = self.dropout(x)
         logits = self.fc(x)
