@@ -11,8 +11,13 @@ from transformers import (
     AutoTokenizer,
     get_linear_schedule_with_warmup,
 )
+from transformers.utils import logging as transformers_logging
 
 from .bert_dataset import BertSentimentDataset
+
+
+transformers_logging.set_verbosity_error()
+transformers_logging.disable_progress_bar()
 
 
 def set_seed(seed=42):
@@ -113,12 +118,7 @@ def train(args):
         total_correct = 0
         total_count = 0
 
-        progress_bar = tqdm(
-    train_loader,
-    desc=f"Epoch {epoch}/{args.epochs}",
-    ascii=True,
-    dynamic_ncols=True,
-)
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}")
 
         for batch in progress_bar:
             input_ids = batch["input_ids"].to(device)

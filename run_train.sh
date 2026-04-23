@@ -1,4 +1,4 @@
-exec python -m src.train \
+nohup python -m src.train \
   --data_dir preprocessed_file \
   --save_path checkpoints/textcnn_best.pt \
   --max_len 48 \
@@ -9,4 +9,5 @@ exec python -m src.train \
   --batch_size 64 \
   --epochs 15 \
   --lr 1e-3 \
-  --weight_decay 1e-4
+  --weight_decay 1e-4\
+  &> logs/train.log &

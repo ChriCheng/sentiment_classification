@@ -42,12 +42,52 @@ def print_error_examples(dataset, labels, preds, confidences, label_names, max_e
 
 
 @torch.no_grad()
+def evaluate(model, dataloader, device):
+    model.eval()
+
+    all_labels = []
+    all_preds = []
+    all_confidences = []
+    total_loss = 0.0
+    total_count = 0
+
+    for batch in dataloader:
+        input_ids = batch["input_ids"].to(device)
+        attention_mask = batch["attention_mask"].to(device)
+        labels = batch["labels"].to(device)
+
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+
+        probs = torch.softmax(outputs.logits, dim=1)
+        confidences, preds = torch.max(probs, dim=1)
+
+        total_loss += outputs.loss.item() * labels.size(0)
+        total_count += labels.size(0)
+
+        all_labels.extend(labels.cpu().tolist())
+        all_preds.extend(preds.cpu().tolist())
+        all_confidences.extend(confidences.cpu().tolist())
+
+    total_correct = sum(int(pred == label) for pred, label in zip(all_preds, all_labels))
+
+    return {
+        "loss": total_loss / total_count,
+        "acc": total_correct / total_count,
+        "labels": all_labels,
+        "preds": all_preds,
+        "confidences": all_confidences,
+    }
+
+
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_dir).to(device)
-    model.eval()
 
     dataset = BertSentimentDataset(
         csv_path=args.test_path,
@@ -63,65 +103,39 @@ def main(args):
         num_workers=0,
     )
 
-    all_preds = []
-    all_labels = []
-    all_confidences = []
-    total_loss = 0.0
-    total_count = 0
-
-    for batch in loader:
-        input_ids = batch["input_ids"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)
-
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels,
-        )
-
-        probs = torch.softmax(outputs.logits, dim=1)
-        confidences, preds = torch.max(probs, dim=1)
-
-        all_preds.extend(preds.cpu().tolist())
-        all_labels.extend(labels.cpu().tolist())
-        all_confidences.extend(confidences.cpu().tolist())
-        total_loss += outputs.loss.item() * labels.size(0)
-        total_count += labels.size(0)
+    metrics = evaluate(model, loader, device)
 
     label_names = LABEL_NAMES[: model.config.num_labels]
-    loss = total_loss / total_count
-    acc = sum(int(p == y) for p, y in zip(all_preds, all_labels)) / len(all_labels)
 
     print("Evaluation Summary:")
     print(f"  device      : {device}")
     print(f"  model dir   : {args.model_dir}")
     print(f"  test set    : {args.test_path}")
     print(f"  test samples: {len(dataset)}")
-    print(f"  test loss   : {loss:.4f}")
-    print(f"  test acc    : {acc:.4f}")
+    print(f"  test loss   : {metrics['loss']:.4f}")
+    print(f"  test acc    : {metrics['acc']:.4f}")
     print()
 
-    print_prediction_distribution(all_preds, label_names)
+    print_prediction_distribution(metrics["preds"], label_names)
     print()
 
-    print_class_accuracy(all_labels, all_preds, label_names)
+    print_class_accuracy(metrics["labels"], metrics["preds"], label_names)
     print()
 
     print("Classification Report:")
-    print_classification_report(all_labels, all_preds, label_names)
+    print_classification_report(metrics["labels"], metrics["preds"], label_names)
     print()
 
     print("Confusion Matrix:")
-    matrix = build_confusion_matrix(all_labels, all_preds, model.config.num_labels)
+    matrix = build_confusion_matrix(metrics["labels"], metrics["preds"], model.config.num_labels)
     print(format_confusion_matrix(matrix, label_names))
     print()
 
     print_error_examples(
         dataset,
-        all_labels,
-        all_preds,
-        all_confidences,
+        metrics["labels"],
+        metrics["preds"],
+        metrics["confidences"],
         label_names,
         args.show_errors,
     )
