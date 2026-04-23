@@ -9,7 +9,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .dataset import LABEL_NAMES, SentimentDataset, load_vocab
-from .embeddings import load_glove_embeddings
 from .model import TextCNN
 
 
@@ -74,16 +73,6 @@ def train(args):
         num_workers=args.num_workers,
     )
 
-    pretrained_embeddings = None
-    glove_coverage = None
-
-    if args.glove_path:
-        pretrained_embeddings, glove_coverage = load_glove_embeddings(
-            glove_path=args.glove_path,
-            token2id=token2id,
-            embed_dim=args.embed_dim,
-        )
-
     model = TextCNN(
         vocab_size=len(token2id),
         embed_dim=args.embed_dim,
@@ -92,8 +81,6 @@ def train(args):
         kernel_sizes=args.kernel_sizes,
         dropout=args.dropout,
         pad_idx=0,
-        pretrained_embeddings=pretrained_embeddings,
-        freeze_embedding=args.freeze_embedding,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -163,9 +150,6 @@ def train(args):
                         "dropout": args.dropout,
                         "pad_idx": 0,
                         "max_len": args.max_len,
-                        "freeze_embedding": args.freeze_embedding,
-                        "use_glove": bool(args.glove_path),
-                        "glove_coverage": glove_coverage,
                     },
                     "best_dev_acc": best_dev_acc,
                 },
@@ -182,18 +166,15 @@ def get_args():
     parser.add_argument("--data_dir", type=str, default="preprocessed_file")
     parser.add_argument("--save_path", type=str, default="checkpoints/textcnn_best.pt")
 
-    parser.add_argument("--glove_path", type=str, default="")
-    parser.add_argument("--freeze_embedding", action="store_true")
-
     parser.add_argument("--max_len", type=int, default=48)
-    parser.add_argument("--embed_dim", type=int, default=100)
+    parser.add_argument("--embed_dim", type=int, default=128)
     parser.add_argument("--num_filters", type=int, default=100)
     parser.add_argument("--kernel_sizes", type=int, nargs="+", default=[3, 4, 5])
     parser.add_argument("--dropout", type=float, default=0.5)
 
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--lr", type=float, default=8e-4)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
 
     parser.add_argument("--num_workers", type=int, default=0)

@@ -1,3 +1,4 @@
-exec python -m src.evaluate \
+nohup python -m src.evaluate \
   --ckpt_path checkpoints/textcnn_best.pt \
-  --test_path preprocessed_file/test.csv
+  --test_path preprocessed_file/test.csv \
+  &> logs/eval.log &

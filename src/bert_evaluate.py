@@ -1,12 +1,44 @@
 import argparse
-import os
 
 import torch
 from torch.utils.data import DataLoader
-from sklearn.metrics import classification_report, confusion_matrix
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from .bert_dataset import BertSentimentDataset
+from .bert_dataset import BertSentimentDataset, detokenize, parse_sentence_field
+from .dataset import LABEL_NAMES
+from .evaluate import (
+    build_confusion_matrix,
+    format_confusion_matrix,
+    print_class_accuracy,
+    print_classification_report,
+    print_prediction_distribution,
+)
+
+
+def print_error_examples(dataset, labels, preds, confidences, label_names, max_examples):
+    if max_examples <= 0:
+        return
+
+    error_indices = [idx for idx, (label, pred) in enumerate(zip(labels, preds)) if label != pred]
+    if not error_indices:
+        print("Error Examples: none")
+        return
+
+    print(f"Error Examples: showing {min(max_examples, len(error_indices))}/{len(error_indices)}")
+    for idx in error_indices[:max_examples]:
+        row = dataset.df.iloc[idx]
+        tokens = parse_sentence_field(row["sentences"])
+        text = detokenize(tokens)
+        if len(text) > 140:
+            text = text[:137] + "..."
+
+        label = labels[idx]
+        pred = preds[idx]
+        confidence = confidences[idx]
+        print(
+            f"  #{idx:<5} true={label}:{label_names[label]} "
+            f"pred={pred}:{label_names[pred]} conf={confidence:.4f} | {text}"
+        )
 
 
 @torch.no_grad()
@@ -33,6 +65,9 @@ def main(args):
 
     all_preds = []
     all_labels = []
+    all_confidences = []
+    total_loss = 0.0
+    total_count = 0
 
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
@@ -42,20 +77,54 @@ def main(args):
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            labels=labels,
         )
 
-        preds = torch.argmax(outputs.logits, dim=1)
+        probs = torch.softmax(outputs.logits, dim=1)
+        confidences, preds = torch.max(probs, dim=1)
 
         all_preds.extend(preds.cpu().tolist())
         all_labels.extend(labels.cpu().tolist())
+        all_confidences.extend(confidences.cpu().tolist())
+        total_loss += outputs.loss.item() * labels.size(0)
+        total_count += labels.size(0)
 
+    label_names = LABEL_NAMES[: model.config.num_labels]
+    loss = total_loss / total_count
     acc = sum(int(p == y) for p, y in zip(all_preds, all_labels)) / len(all_labels)
-    print(f"Test acc: {acc:.4f}")
+
+    print("Evaluation Summary:")
+    print(f"  device      : {device}")
+    print(f"  model dir   : {args.model_dir}")
+    print(f"  test set    : {args.test_path}")
+    print(f"  test samples: {len(dataset)}")
+    print(f"  test loss   : {loss:.4f}")
+    print(f"  test acc    : {acc:.4f}")
     print()
+
+    print_prediction_distribution(all_preds, label_names)
+    print()
+
+    print_class_accuracy(all_labels, all_preds, label_names)
+    print()
+
     print("Classification Report:")
-    print(classification_report(all_labels, all_preds, digits=4))
+    print_classification_report(all_labels, all_preds, label_names)
+    print()
+
     print("Confusion Matrix:")
-    print(confusion_matrix(all_labels, all_preds))
+    matrix = build_confusion_matrix(all_labels, all_preds, model.config.num_labels)
+    print(format_confusion_matrix(matrix, label_names))
+    print()
+
+    print_error_examples(
+        dataset,
+        all_labels,
+        all_preds,
+        all_confidences,
+        label_names,
+        args.show_errors,
+    )
 
 
 def get_args():
@@ -64,6 +133,12 @@ def get_args():
     parser.add_argument("--test_path", type=str, default="preprocessed_file/test.csv")
     parser.add_argument("--max_len", type=int, default=64)
     parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument(
+        "--show_errors",
+        type=int,
+        default=0,
+        help="Number of misclassified examples to print.",
+    )
     return parser.parse_args()
 
 
