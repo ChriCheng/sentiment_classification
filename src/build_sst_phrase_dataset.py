@@ -4,7 +4,12 @@ import csv
 import os
 import re
 from collections import Counter, defaultdict
-
+def normalize_quotes(text: str) -> str:
+    text = text.replace("`` ", "\"")
+    text = text.replace(" ''", "\"")
+    text = text.replace("``", "\"")
+    text = text.replace("''", "\"")
+    return text
 
 def normalize_token(tok: str) -> str:
     mapping = {
@@ -100,12 +105,7 @@ def load_sentence_splits(dataset_sentences_path: str, dataset_split_path: str):
             sent_id, split_id = line.split(",")
             sent_id_to_split[int(sent_id)] = int(split_id)
 
-    text_to_split = {}
-    for sent_id, sentence in sent_id_to_text.items():
-        split_id = sent_id_to_split[sent_id]
-        text_to_split[sentence] = split_id
-
-    return text_to_split
+    return sent_id_to_text, sent_id_to_split
 
 
 def load_sostr(path: str):
@@ -134,7 +134,16 @@ def lookup_label(raw_tokens, norm_tokens, phrase_to_id, id_to_value):
     detok_raw = detokenize(raw_tokens)
     detok_norm = detokenize(norm_tokens)
 
-    candidates.extend([raw_phrase, norm_phrase, detok_raw, detok_norm])
+    candidates.extend([
+        raw_phrase,
+        norm_phrase,
+        detok_raw,
+        detok_norm,
+        normalize_quotes(raw_phrase),
+        normalize_quotes(norm_phrase),
+        normalize_quotes(detok_raw),
+        normalize_quotes(detok_norm),
+    ])
 
     seen = set()
     for cand in candidates:
@@ -232,10 +241,10 @@ def main():
 
     phrase_to_id = load_dictionary(os.path.join(raw_dir, "dictionary.txt"))
     id_to_value = load_sentiment_labels(os.path.join(raw_dir, "sentiment_labels.txt"))
-    text_to_split = load_sentence_splits(
-        os.path.join(raw_dir, "datasetSentences.txt"),
-        os.path.join(raw_dir, "datasetSplit.txt"),
-    )
+    sent_id_to_text, sent_id_to_split = load_sentence_splits(
+    os.path.join(raw_dir, "datasetSentences.txt"),
+    os.path.join(raw_dir, "datasetSplit.txt"),
+)
     all_tokens = load_sostr(os.path.join(raw_dir, "SOStr.txt"))
     all_parents = load_stree(os.path.join(raw_dir, "STree.txt"))
 
@@ -250,16 +259,15 @@ def main():
         node_info, root = extract_node_tokens(tokens, parents)
         _, root_raw, root_norm = node_info[root]
 
+        sentence_id = tree_id + 1
+        split_id = sent_id_to_split.get(sentence_id)
+
+        if split_id is None:
+            raise ValueError(f"Cannot find split for sentence_id={sentence_id}")
+
+        # 这两行只保留作调试信息，不再用于 split 匹配
         root_sentence = detokenize(root_norm)
-        split_id = text_to_split.get(root_sentence)
-
-        if split_id is None:
-            # 尝试用未 normalize 版本匹配
-            alt_root_sentence = detokenize(root_raw)
-            split_id = text_to_split.get(alt_root_sentence)
-
-        if split_id is None:
-            raise ValueError(f"Cannot match split for sentence: {root_sentence}")
+        original_sentence = sent_id_to_text.get(sentence_id, "")
 
         if split_id == 1:
             # train: 用整个句子的所有子树（包括 root sentence）

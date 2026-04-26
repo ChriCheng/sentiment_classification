@@ -2,5 +2,6 @@ logs/*
 checkpoints/*
 test.ipynb
 .venv/*
-embeddings/glove.6B.100d.txt
 stanfordSentimentTreebank/*
+data/*
+embeddings/*
